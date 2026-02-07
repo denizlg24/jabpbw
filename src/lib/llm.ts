@@ -4,7 +4,7 @@ import Anthropic, {
   AuthenticationError,
   RateLimitError,
 } from "@anthropic-ai/sdk";
-import { getAnthropicApiKey, getModelId } from "./config";
+import { getAnthropicApiKey, getModelId, getAuthorProfile } from "./config";
 import {
   CreateBlogPayloadSchema,
   type CreateBlogPayload,
@@ -44,11 +44,7 @@ function formatApiError(error: unknown): string {
   return "An unexpected error occurred.";
 }
 
-export type PipelineStep =
-  | "brainstorming"
-  | "writing"
-  | "reviewing"
-  | "formatting";
+export type PipelineStep = "writing" | "reviewing" | "formatting";
 
 export interface TokenUsage {
   inputTokens: number;
@@ -56,15 +52,23 @@ export interface TokenUsage {
   cost: number;
 }
 
-const WRITER_SYSTEM = `You are a skilled blog writer for a personal tech/sports/lifestyle portfolio blog. Write engaging, natural blog posts in markdown format. The posts should:
+function getWriterSystem(): string {
+  const author = getAuthorProfile();
+  const authorBlock = author
+    ? `\n\nThe author's profile (use to match their voice and tone, not as content to reference directly):\n\n${author}\n`
+    : "";
+  return `You are a skilled blog writer for a personal tech/sports/lifestyle portfolio blog. Write engaging, natural blog posts in markdown format. The posts should:
 - Sound human and conversational, not robotic or corporate
 - Be well-structured with clear headings (## for sections)
 - Include a compelling introduction and conclusion
 - Be between 800-1500 words
 - Avoid clichés, filler phrases, and typical AI patterns like "In today's world", "Let's dive in", "In conclusion", "It's not X, it's Y", etc.
 - Use specific examples and concrete details
+- BEFORE writing about any specific project or repository, use web search to verify it exists and understand what it actually does. NEVER guess based on a project name alone.
 You have access to a web search tool. Use it when the topic references a URL, a specific project, recent events, or anything you need to fact-check or gather details about. Do NOT search for general knowledge you already know well.
+${authorBlock}
 Output ONLY the markdown content of the blog post, nothing else.`;
+}
 
 const REVIEWER_SYSTEM = `You are a sharp editorial reviewer. Given a blog post, output a concise numbered list of corrections. Focus on:
 - AI-sounding phrases or patterns to rephrase
@@ -87,15 +91,26 @@ const FORMATTER_SYSTEM = `You are a formatting assistant. Given a blog post and 
 }
 Output ONLY valid JSON, no markdown fences, no explanation.`;
 
-const BRAINSTORM_SYSTEM = `You suggest blog post topics for a personal tech/sports/lifestyle portfolio blog. Given a list of existing blog post summaries, suggest a single fresh topic that:
-- Does NOT overlap with existing posts
-- Is relevant and timely in tech, sports, or lifestyle
-- Would be interesting to a developer/tech enthusiast audience
-- Is specific enough to write a focused post about
-- Don't ever imagine tools that I haven't built yet.
-- You have web search capabilities, so you can suggest topics about recent events, new projects, or specific technologies.
-- You can access https://github.com/denizlg24?tab=repositories to check for new repositories or projects to write about.
-Output ONLY the topic as a single sentence (under 15 words), nothing else.`;
+function getBrainstormSystem(): string {
+  const author = getAuthorProfile();
+  const authorBlock = author
+    ? `\nFor additional context, here is some background on the author:\n${author}\nDo NOT directly reference the profile in your suggestions. Use it only to gauge what kind of topics would resonate.\n`
+    : "";
+  return `You suggest blog post topics for a personal tech/sports/lifestyle portfolio blog. Given the existing posts, suggest 5 creative and diverse topics.
+
+Topic distribution (strictly follow this):
+- At most 1 topic may relate to the author's own projects (only if you've verified it exists via https://github.com/denizlg24). This is optional — you can suggest 0 project topics.
+- The other 4-5 topics must be broader and more creative. Think: hot takes, contrarian opinions, unexpected connections between fields, personal reflections, life lessons through a tech lens, cultural observations, underrated tools/habits, "what I wish I knew" pieces, sports analogies for dev life, etc.
+
+Guidelines:
+- Do NOT overlap with existing posts
+- Favor thought-provoking, personal-angle topics over informational ones. The reader should think "huh, interesting take" not "I could Google this"
+- Bad examples: "The state of AI in 2025", "Getting started with React", "My new project X"
+- Good examples: "The mass-produced personality of dev influencers", "Why your side project doesn't need users", "What rock climbing taught me about debugging"
+- You have web search available if you want to find recent events or trends, but you don't have to use it
+${authorBlock}
+Output ONLY a numbered list (1-5), one topic per line, each under 15 words. No preamble, no explanation, no commentary.`;
+}
 
 class TextExtractionError extends Error {
   constructor(
@@ -174,36 +189,66 @@ interface StepResult<T> {
   outputTokens: number;
 }
 
-async function brainstormTopic(
-  client: Anthropic,
-  model: string,
-  summaries: { title: string; excerpt: string; tags?: string[] }[],
-): Promise<StepResult<string>> {
-  const summaryText =
-    summaries.length > 0
-      ? summaries.map((s) => `- "${s.title}": ${s.excerpt}`).join("\n")
-      : "No existing posts yet.";
+export interface BrainstormResult {
+  topics: string[];
+  usage: TokenUsage;
+}
 
-  const response = await client.messages.create({
-    model,
-    max_tokens: 256,
-    system: BRAINSTORM_SYSTEM,
-    messages: [
-      {
-        role: "user",
-        content: `Existing blog posts:\n${summaryText}\n\nSuggest one new topic.`,
+export async function brainstormTopics(
+  onProgress?: (usage: TokenUsage) => void,
+): Promise<BrainstormResult> {
+  const client = getClient();
+  const model = getModel();
+
+  try {
+    const summaries = await fetchBlogSummaries();
+    const summaryText =
+      summaries.length > 0
+        ? summaries.map((s) => `- "${s.title}": ${s.excerpt}`).join("\n")
+        : "No existing posts yet.";
+
+    const response = await client.messages.create({
+      model,
+      max_tokens: 512,
+      system: getBrainstormSystem(),
+      messages: [
+        {
+          role: "user",
+          content: `Existing blog posts:\n${summaryText}\n\nSuggest 5 new topics.`,
+        },
+      ],
+      tool_choice: {
+        type: "auto",
       },
-    ],
-    tool_choice: {
-      type: "any",
-    },
-    tools: [WEB_SEARCH_TOOL],
-  });
-  return {
-    data: extractText(response).trim(),
-    inputTokens: response.usage.input_tokens,
-    outputTokens: response.usage.output_tokens,
-  };
+      tools: [WEB_SEARCH_TOOL],
+    });
+
+    const raw = extractText(response).trim();
+    const topics = raw
+      .split("\n")
+      .filter((line) => /^\d+[\.\)]/.test(line.trim()))
+      .map((line) => line.trim().replace(/^\d+[\.\)]\s*/, "").trim())
+      .filter((line) => line.length > 0);
+
+    const usage: TokenUsage = {
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      cost: calculateCost(
+        model,
+        response.usage.input_tokens,
+        response.usage.output_tokens,
+      ),
+    };
+
+    onProgress?.(usage);
+
+    return { topics, usage };
+  } catch (error) {
+    if (error instanceof APIError || error instanceof APIConnectionError) {
+      throw new Error(formatApiError(error));
+    }
+    throw error;
+  }
 }
 
 const WEB_SEARCH_TOOL = {
@@ -220,7 +265,7 @@ async function writeBlogPost(
   const response = await client.messages.create({
     model,
     max_tokens: 4096,
-    system: WRITER_SYSTEM,
+    system: getWriterSystem(),
     tools: [WEB_SEARCH_TOOL],
     tool_choice: {
       type: "any",
@@ -314,7 +359,6 @@ export async function generateBlog(
   const model = getModel();
   let totalInput = 0;
   let totalOutput = 0;
-  let resolvedTopic = topic;
 
   const reportProgress = (step: PipelineStep) => {
     onProgress({
@@ -328,17 +372,8 @@ export async function generateBlog(
   };
 
   try {
-    if (!resolvedTopic) {
-      reportProgress("brainstorming");
-      const summaries = await fetchBlogSummaries();
-      const brainstorm = await brainstormTopic(client, model, summaries);
-      totalInput += brainstorm.inputTokens;
-      totalOutput += brainstorm.outputTokens;
-      resolvedTopic = brainstorm.data;
-    }
-
     reportProgress("writing");
-    const draft = await writeBlogPost(client, model, resolvedTopic);
+    const draft = await writeBlogPost(client, model, topic);
     totalInput += draft.inputTokens;
     totalOutput += draft.outputTokens;
 

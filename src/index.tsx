@@ -1,20 +1,22 @@
 import { ConsolePosition, createCliRenderer, TextAttributes } from "@opentui/core";
 import { createRoot, useKeyboard } from "@opentui/react";
 import { useState } from "react";
-import { hasAllKeys } from "./lib/config";
-import type { PipelineResult } from "./lib/llm";
+import { hasAllKeys, ensureAuthorFile } from "./lib/config";
+import type { PipelineResult, TokenUsage } from "./lib/llm";
 import { ApiTestPage } from "./pages/api-test";
 import { HomePage } from "./pages/home";
 import { PreviewPage } from "./pages/preview";
 import { SetupPage } from "./pages/setup";
+import { TopicPickerPage } from "./pages/topic-picker";
 import { WritingPage } from "./pages/writing";
 
-type Page = "setup" | "home" | "writing" | "preview" | "api-test";
+type Page = "setup" | "home" | "topic-picker" | "writing" | "preview" | "api-test";
 
 function App() {
   const [exitRequested, setExitRequested] = useState(false);
   const [page, setPage] = useState<Page>(hasAllKeys() ? "home" : "setup");
   const [topic, setTopic] = useState("");
+  const [brainstormUsage, setBrainstormUsage] = useState<TokenUsage | null>(null);
   const [pipelineResult, setPipelineResult] = useState<PipelineResult | null>(null);
 
   useKeyboard((key) => {
@@ -40,7 +42,18 @@ function App() {
   });
 
   const handleSubmitTopic = (submittedTopic: string) => {
+    if (!submittedTopic) {
+      setPage("topic-picker");
+      return;
+    }
     setTopic(submittedTopic);
+    setBrainstormUsage(null);
+    setPage("writing");
+  };
+
+  const handleTopicPicked = (pickedTopic: string, usage: TokenUsage) => {
+    setTopic(pickedTopic);
+    setBrainstormUsage(usage);
     setPage("writing");
   };
 
@@ -51,6 +64,7 @@ function App() {
 
   const handlePreviewDone = () => {
     setPipelineResult(null);
+    setBrainstormUsage(null);
     setTopic("");
     setPage("home");
   };
@@ -69,9 +83,15 @@ function App() {
         />
       ) : page === "api-test" ? (
         <ApiTestPage onBack={() => setPage("home")} />
+      ) : page === "topic-picker" ? (
+        <TopicPickerPage
+          onSelect={handleTopicPicked}
+          onBack={() => setPage("home")}
+        />
       ) : page === "writing" ? (
         <WritingPage
           topic={topic}
+          initialUsage={brainstormUsage ?? undefined}
           onComplete={handleWritingComplete}
           onBack={() => setPage("home")}
         />
@@ -99,6 +119,8 @@ function App() {
     </box>
   );
 }
+
+ensureAuthorFile();
 
 const renderer = await createCliRenderer({
   consoleOptions: {

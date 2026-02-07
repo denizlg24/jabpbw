@@ -12,14 +12,7 @@ import { getModelDef } from "../lib/models";
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-const STEPS_WITH_BRAINSTORM: { key: PipelineStep; label: string }[] = [
-  { key: "brainstorming", label: "Brainstorming topic" },
-  { key: "writing", label: "Writing blog post" },
-  { key: "reviewing", label: "Reviewing & correcting" },
-  { key: "formatting", label: "Formatting final version" },
-];
-
-const STEPS_DIRECT: { key: PipelineStep; label: string }[] = [
+const STEPS: { key: PipelineStep; label: string }[] = [
   { key: "writing", label: "Writing blog post" },
   { key: "reviewing", label: "Reviewing & correcting" },
   { key: "formatting", label: "Formatting final version" },
@@ -36,21 +29,16 @@ function formatCost(cost: number): string {
 
 interface WritingPageProps {
   topic: string;
+  initialUsage?: TokenUsage;
   onComplete: (result: PipelineResult) => void;
   onBack: () => void;
 }
 
-export const WritingPage = ({ topic, onComplete, onBack }: WritingPageProps) => {
-  const isAutoTopic = !topic;
-  const steps = isAutoTopic ? STEPS_WITH_BRAINSTORM : STEPS_DIRECT;
-  const [currentStep, setCurrentStep] = useState<PipelineStep>(
-    isAutoTopic ? "brainstorming" : "writing",
+export const WritingPage = ({ topic, initialUsage, onComplete, onBack }: WritingPageProps) => {
+  const [currentStep, setCurrentStep] = useState<PipelineStep>("writing");
+  const [usage, setUsage] = useState<TokenUsage>(
+    initialUsage ?? { inputTokens: 0, outputTokens: 0, cost: 0 },
   );
-  const [usage, setUsage] = useState<TokenUsage>({
-    inputTokens: 0,
-    outputTokens: 0,
-    cost: 0,
-  });
   const [frame, setFrame] = useState(0);
   const [error, setError] = useState("");
 
@@ -70,15 +58,32 @@ export const WritingPage = ({ topic, onComplete, onBack }: WritingPageProps) => 
   }, []);
 
   useEffect(() => {
+    const baseInput = initialUsage?.inputTokens ?? 0;
+    const baseOutput = initialUsage?.outputTokens ?? 0;
+    const baseCost = initialUsage?.cost ?? 0;
+
     generateBlog(topic, (progress) => {
       setCurrentStep(progress.step);
-      setUsage(progress.usage);
+      setUsage({
+        inputTokens: baseInput + progress.usage.inputTokens,
+        outputTokens: baseOutput + progress.usage.outputTokens,
+        cost: baseCost + progress.usage.cost,
+      });
     })
-      .then(onComplete)
+      .then((result) => {
+        onComplete({
+          payload: result.payload,
+          usage: {
+            inputTokens: baseInput + result.usage.inputTokens,
+            outputTokens: baseOutput + result.usage.outputTokens,
+            cost: baseCost + result.usage.cost,
+          },
+        });
+      })
       .catch((err: Error) => setError(err.message));
   }, []);
 
-  const currentIndex = steps.findIndex((s) => s.key === currentStep);
+  const currentIndex = STEPS.findIndex((s) => s.key === currentStep);
 
   return (
     <box
@@ -88,9 +93,7 @@ export const WritingPage = ({ topic, onComplete, onBack }: WritingPageProps) => 
     >
       <ascii-font font="block" text="Writing" style={{ marginTop: "2%" }} />
       <text style={{ marginTop: 2 }} attributes={TextAttributes.DIM}>
-        {isAutoTopic
-          ? "Auto-generating a blog post..."
-          : `Generating blog post about: ${topic.length > 60 ? topic.slice(0, 57) + "..." : topic}`}
+        {`Generating blog post about: ${topic.length > 60 ? topic.slice(0, 57) + "..." : topic}`}
       </text>
       <box
         flexDirection="column"
@@ -107,7 +110,7 @@ export const WritingPage = ({ topic, onComplete, onBack }: WritingPageProps) => 
         title="Progress"
         titleAlignment="center"
       >
-        {steps.map((step, i) => {
+        {STEPS.map((step, i) => {
           const isDone = i < currentIndex;
           const isActive = i === currentIndex;
           const prefix = isDone

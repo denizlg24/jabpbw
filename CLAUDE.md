@@ -108,11 +108,12 @@ src/
   lib/
     config.ts        # API key + model persistence (~/.portfolio-blog-writer/config.json)
     api.ts           # denizlg24.com API client (fetch blogs, create blog)
-    llm.ts           # Claude API blog generation pipeline (brainstorm + 3-step) with web search tool
+    llm.ts           # Claude API blog generation pipeline (3-step) + brainstormTopics() with web search tool
     models.ts        # Model definitions (IDs, names, pricing per MTok)
   pages/
     setup.tsx        # First-run setup: portfolio key → Anthropic key → model selection
     home.tsx         # Main page with topic textarea input
+    topic-picker.tsx # Auto-topic: brainstorms 5 topics, user picks one via <select>
     writing.tsx      # Progress page showing 3-step LLM pipeline + live token usage
     preview.tsx      # Blog post preview with approve/discard + total cost display
     api-test.tsx     # Temporary debug page to verify API connectivity
@@ -120,7 +121,7 @@ src/
 
 ### Routing
 
-`index.tsx` manages a `page` state (`"setup" | "home" | "writing" | "preview" | "api-test"`) and flow state (`topic: string`, `pipelineResult: PipelineResult | null`). On startup it checks `hasAllKeys()` — if any key/model is missing it shows `SetupPage`, otherwise `HomePage`. Flow: home → writing → preview → home.
+`index.tsx` manages a `page` state (`"setup" | "home" | "topic-picker" | "writing" | "preview" | "api-test"`) and flow state (`topic: string`, `brainstormUsage: TokenUsage | null`, `pipelineResult: PipelineResult | null`). On startup it checks `hasAllKeys()` — if any key/model is missing it shows `SetupPage`, otherwise `HomePage`. Flow: home → (topic-picker if empty topic) → writing → preview → home. When a topic is picked from the topic-picker, its brainstorm token usage is carried forward and folded into the writing/preview totals.
 
 ### Config (`src/lib/config.ts`)
 
@@ -129,6 +130,13 @@ Stores/reads a JSON config at `~/.portfolio-blog-writer/config.json` with `{ api
 - `getAnthropicApiKey()`, `saveAnthropicApiKey(key)`, `hasAnthropicApiKey()` — Anthropic API key
 - `getModelId()`, `saveModelId(id)`, `hasModelId()` — selected Claude model
 - `hasAllKeys()` — checks all three are present
+- `getAuthorProfile()` — reads `~/.portfolio-blog-writer/author.md`, returns content or `null` if missing/unchanged from template
+- `ensureAuthorFile()` — creates `author.md` with the question template if it doesn't exist
+- `getAuthorFilePath()` — returns the absolute path to `author.md`
+
+### Author Profile (`~/.portfolio-blog-writer/author.md`)
+
+A markdown file with questions about the blog author (identity, personality, interests, writing style, opinions). Created automatically on first launch. When filled in, injected into the brainstorm and writer system prompts so the LLM can match the author's voice and suggest relevant topics. Lines starting with `#` are kept as-is (they're part of the prompt context). If the file is empty or unchanged from the template, it's ignored.
 
 ### Models (`src/lib/models.ts`)
 
@@ -148,8 +156,11 @@ Exports `MODELS`, `DEFAULT_MODEL`, `getModelDef(id)`, `calculateCost(modelId, in
 
 ### LLM Pipeline (`src/lib/llm.ts`)
 
-Uses `@anthropic-ai/sdk` with the user-selected model (`maxRetries: 3`). Pipeline exposed via `generateBlog(topic, onProgress)`:
-- When `topic` is empty (Case 2): adds a **brainstormTopic** step first — fetches blog summaries via `fetchBlogSummaries()`, sends them to the LLM with web search (`tool_choice: "any"`) to pick a fresh topic (max 256 output tokens). The chosen topic is then fed into the normal pipeline.
+Uses `@anthropic-ai/sdk` with the user-selected model (`maxRetries: 3`). Two main exports:
+
+**`brainstormTopics(onProgress?)`** — Standalone function for the topic-picker flow. Fetches blog summaries, asks the LLM for 5 topic suggestions (max 512 output tokens, web search enabled), parses the numbered list into `string[]`. Returns `BrainstormResult { topics, usage }`. Handles API errors with `formatApiError()`.
+
+**`generateBlog(topic, onProgress)`** — Always receives a resolved topic (never empty). 3-step pipeline:
 - **writeBlogPost** (max 4096 tokens) — Sends topic, gets markdown blog post (800-1500 words). Includes Anthropic's `web_search_20250305` server tool (max 3 uses, `tool_choice: "any"`) so Claude can search the web when the topic references URLs, specific projects, or recent events. System prompt instructs when to use search vs. relying on existing knowledge.
 - **reviewBlogPost** (max 1024 tokens) — Sends draft, gets compact numbered correction list. Returns "NO CORRECTIONS NEEDED" if post is clean.
 - **formatBlogPost** (max 5120 tokens) — Sends draft + corrections, gets final `CreateBlogPayload` JSON. Needs higher limit because it re-outputs the full corrected blog content inside JSON.
@@ -167,10 +178,10 @@ Uses `@anthropic-ai/sdk` with the user-selected model (`maxRetries: 3`). Pipelin
 - 529 → overloaded, 403 → permission, 413 → request too large
 Non-API errors (JSON parse, zod validation) pass through as-is.
 
-`PipelineStep` type: `"brainstorming" | "writing" | "reviewing" | "formatting"`. Each step returns `StepResult<T>` with `{ data, inputTokens, outputTokens }`. The pipeline accumulates token counts and reports `PipelineProgress { step, usage: TokenUsage }` after each step via callback. Returns `PipelineResult { payload, usage }`.
+`PipelineStep` type: `"writing" | "reviewing" | "formatting"`. Each step returns `StepResult<T>` with `{ data, inputTokens, outputTokens }`. The pipeline accumulates token counts and reports `PipelineProgress { step, usage: TokenUsage }` after each step via callback. Returns `PipelineResult { payload, usage }`.
 
 **Token budget rationale** (keep `max_tokens` low — OTPM rate limits are estimated upfront from this value; Tier 1 only has 8000 OTPM):
-- Brainstorm: 256 (single sentence + search query overhead)
+- Brainstorm (separate function): 512 (5 topic sentences + search query overhead)
 - Writer: 4096 (1500-word post ≈ 2200 tokens + web search tool call overhead)
 - Reviewer: 1024 (short correction list)
 - Formatter: 5120 (full blog JSON — the content field alone can be ~2200 tokens)
@@ -180,8 +191,9 @@ Web search is billed separately by Anthropic at $10/1000 searches. The Anthropic
 ### Pages
 
 - **SetupPage** — Three-step flow: (1) portfolio API key (`dlg24_` prefix), (2) Anthropic API key (`sk-ant-` prefix), (3) model selection via `<select>` with `selectedIndex` pre-set to current model. On first run, skips already-configured steps. In reconfigure mode (Ctrl+S from home): shows "Settings" header, displays current masked key values and current model name, Tab/Shift+Tab to navigate between steps without changing anything, Enter to save a new value or skip if empty, Backspace on empty input to go back. Accepts optional `onBack` prop — when provided, enables reconfigure mode.
-- **HomePage** — ASCII "Welcome" header, `<textarea>` for topic input (Enter to submit, empty submit triggers auto-topic). Uses a ref to read `plainText` from the textarea on submit. Ctrl+S opens settings, Ctrl+T navigates to API test page.
-- **WritingPage** — ASCII "Writing" header, shows progress steps with spinner animation (80ms interval). When topic is empty, shows 4 steps (brainstorming + writing + reviewing + formatting); otherwise 3 steps (writing + reviewing + formatting). Steps show ✓ when done, spinner when active, ○ when pending. Displays live token usage line: model name, input/output tokens, running cost. Calls `generateBlog()` on mount, transitions to preview on success. Shows errors inline with Enter to go back.
+- **HomePage** — ASCII "Welcome" header, `<textarea>` for topic input (Enter to submit, empty submit triggers topic-picker). Uses a ref to read `plainText` from the textarea on submit. Ctrl+S opens settings, Ctrl+T navigates to API test page.
+- **TopicPickerPage** — ASCII "Topics" header. On mount calls `brainstormTopics()` with a spinner loading state. Once topics arrive, displays them in a `<select>` for the user to choose. Enter to confirm selection, Backspace to go back to home. Shows brainstorm token usage (model, tokens, cost). Props: `onSelect(topic, usage)`, `onBack()`.
+- **WritingPage** — ASCII "Writing" header, always shows 3 progress steps (writing + reviewing + formatting) with spinner animation (80ms interval). Steps show ✓ when done, spinner when active, ○ when pending. Accepts optional `initialUsage` prop to fold brainstorm cost into the running total. Displays live token usage line: model name, input/output tokens, running cost. Calls `generateBlog()` on mount, transitions to preview on success. Shows errors inline with Enter to go back.
 - **PreviewPage** — ASCII "Preview" header, shows blog title/excerpt/tags in a bordered box, and full markdown content in a scrollbox. Displays total token usage and cost. Enter to approve & upload, Backspace to discard. Success/error status shown as single-line text to avoid overlap.
 - **ApiTestPage** — Temporary page. Fetches blog summaries on mount, shows count + scrollable list of titles/excerpts/tags. Backspace to return home. Can be removed once the main flow is complete.
 
