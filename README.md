@@ -10,41 +10,16 @@ There's nothing fancy here — the interesting part is how it's built, not what 
 
 ## Install
 
-Download the latest binary for your platform from [Releases](https://github.com/denizlg24/jabpbw/releases/latest).
-
-### Linux (x64)
+### Linux / macOS
 
 ```bash
-curl -Lo jabpbw https://github.com/denizlg24/jabpbw/releases/latest/download/jabpbw-linux-x64
-chmod +x jabpbw
-sudo mv jabpbw /usr/local/bin/
+curl -fsSL https://raw.githubusercontent.com/denizlg24/jabpbw/master/install.sh | sh
 ```
 
-### Linux (ARM64)
-
-```bash
-curl -Lo jabpbw https://github.com/denizlg24/jabpbw/releases/latest/download/jabpbw-linux-arm64
-chmod +x jabpbw
-sudo mv jabpbw /usr/local/bin/
-```
-
-### macOS (Apple Silicon)
-
-```bash
-curl -Lo jabpbw https://github.com/denizlg24/jabpbw/releases/latest/download/jabpbw-darwin-arm64
-chmod +x jabpbw
-sudo mv jabpbw /usr/local/bin/
-```
-
-### Windows (x64)
+### Windows (PowerShell)
 
 ```powershell
-Invoke-WebRequest -Uri "https://github.com/denizlg24/jabpbw/releases/latest/download/jabpbw-windows-x64.exe" -OutFile "$env:LOCALAPPDATA\jabpbw.exe"
-# Add to PATH (run once)
-$path = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($path -notlike "*$env:LOCALAPPDATA*") {
-    [Environment]::SetEnvironmentVariable("Path", "$path;$env:LOCALAPPDATA", "User")
-}
+irm https://raw.githubusercontent.com/denizlg24/jabpbw/master/install.ps1 | iex
 ```
 
 Then open a new terminal and run:
@@ -52,6 +27,8 @@ Then open a new terminal and run:
 ```
 jabpbw
 ```
+
+Binaries are also available directly from the [Releases](https://github.com/denizlg24/jabpbw/releases/latest) page.
 
 ## Development
 

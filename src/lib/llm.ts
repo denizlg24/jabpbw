@@ -80,7 +80,7 @@ const FORMATTER_SYSTEM = `You are a formatting assistant. Given a blog post and 
 {
   "title": "string (catchy blog title)",
   "excerpt": "string (2-3 sentence summary)",
-  "content": "string (full corrected markdown content)",
+  "content": "string (full corrected markdown content, remove the first heading as the website shows the title as a heading already)",
   "tags": ["string (single-word relevant, capitalized, keywords, 1-4 tags)"],
   "media": [],
   "isActive": true
