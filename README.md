@@ -1,15 +1,9 @@
-# react
+# JABPBW
 
-To install dependencies:
+> **Just A Boring Portfolio Blog Writer**
 
-```bash
-bun install
-```
+JABPBW is an automated blog-writing tool used to generate and refine posts for my personal portfolio.
 
-To run:
+It analyzes existing posts, proposes new topics, writes a draft, critiques it, and outputs a final, publish-ready article.
 
-```bash
-bun dev
-```
-
-This project was created using `bun create tui`. [create-tui](https://git.new/create-tui) is the easiest way to get started with OpenTUI.
+There’s nothing fancy here — the interesting part is how it’s built, not what it claims to be.
