@@ -36,14 +36,6 @@ chmod +x jabpbw
 sudo mv jabpbw /usr/local/bin/
 ```
 
-### macOS (Intel)
-
-```bash
-curl -Lo jabpbw https://github.com/denizlg24/jabpbw/releases/latest/download/jabpbw-darwin-x64
-chmod +x jabpbw
-sudo mv jabpbw /usr/local/bin/
-```
-
 ### Windows (x64)
 
 ```powershell
