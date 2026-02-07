@@ -1,3 +1,4 @@
+import { z } from "zod/v4";
 import { getApiKey } from "./config";
 
 const BASE_URL = "https://denizlg24.com";
@@ -15,14 +16,16 @@ export interface IBlog {
   updatedAt: string;
 }
 
-export interface CreateBlogPayload {
-  title: string;
-  excerpt: string;
-  media: string[];
-  content: string;
-  tags: string[];
-  isActive: boolean;
-}
+export const CreateBlogPayloadSchema = z.object({
+  title: z.string().min(1),
+  excerpt: z.string().min(1),
+  media: z.array(z.string()).default([]),
+  content: z.string().min(1),
+  tags: z.array(z.string()).default([]),
+  isActive: z.boolean().default(true),
+});
+
+export type CreateBlogPayload = z.infer<typeof CreateBlogPayloadSchema>;
 
 class ApiError extends Error {
   constructor(

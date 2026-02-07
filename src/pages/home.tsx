@@ -1,14 +1,26 @@
-import { TextAttributes } from "@opentui/core";
+import { TextAttributes, type TextareaRenderable } from "@opentui/core";
 import { useKeyboard } from "@opentui/react";
+import { useRef } from "react";
 
 interface HomePageProps {
   onTestApi: () => void;
+  onSubmitTopic: (topic: string) => void;
+  onSettings: () => void;
 }
 
-export const HomePage = ({ onTestApi }: HomePageProps) => {
+export const HomePage = ({ onTestApi, onSubmitTopic, onSettings }: HomePageProps) => {
+  const textareaRef = useRef<TextareaRenderable>(null);
+
   useKeyboard((key) => {
     if (key.name === "t" && key.ctrl) {
       onTestApi();
+    }
+    if (key.name === "s" && key.ctrl) {
+      onSettings();
+    }
+    if (key.name === "return") {
+      const topic = textareaRef.current?.plainText.trim() ?? "";
+      onSubmitTopic(topic);
     }
   });
 
@@ -34,16 +46,13 @@ export const HomePage = ({ onTestApi }: HomePageProps) => {
         }}
       >
         <textarea
+          ref={textareaRef}
           placeholder="Start writing here..."
-          onSubmit={(e) => {
-            console.log("Submitted:", e);
-          }}
-          keyBindings={[{ name: "return", ctrl: true, action: "submit" }]}
           focused
         />
       </box>
       <text style={{ marginTop: 1 }} attributes={TextAttributes.DIM}>
-        Ctrl+T to test API connection
+        Enter to submit (empty = auto-topic) | Ctrl+S settings | Ctrl+T test API
       </text>
     </box>
   );

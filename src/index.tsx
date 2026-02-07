@@ -1,16 +1,21 @@
 import { ConsolePosition, createCliRenderer, TextAttributes } from "@opentui/core";
 import { createRoot, useKeyboard } from "@opentui/react";
 import { useState } from "react";
-import { hasApiKey } from "./lib/config";
+import { hasAllKeys } from "./lib/config";
+import type { PipelineResult } from "./lib/llm";
 import { ApiTestPage } from "./pages/api-test";
 import { HomePage } from "./pages/home";
+import { PreviewPage } from "./pages/preview";
 import { SetupPage } from "./pages/setup";
+import { WritingPage } from "./pages/writing";
 
-type Page = "setup" | "home" | "api-test";
+type Page = "setup" | "home" | "writing" | "preview" | "api-test";
 
 function App() {
   const [exitRequested, setExitRequested] = useState(false);
-  const [page, setPage] = useState<Page>(hasApiKey() ? "home" : "setup");
+  const [page, setPage] = useState<Page>(hasAllKeys() ? "home" : "setup");
+  const [topic, setTopic] = useState("");
+  const [pipelineResult, setPipelineResult] = useState<PipelineResult | null>(null);
 
   useKeyboard((key) => {
     switch (key.name) {
@@ -34,6 +39,22 @@ function App() {
     }
   });
 
+  const handleSubmitTopic = (submittedTopic: string) => {
+    setTopic(submittedTopic);
+    setPage("writing");
+  };
+
+  const handleWritingComplete = (result: PipelineResult) => {
+    setPipelineResult(result);
+    setPage("preview");
+  };
+
+  const handlePreviewDone = () => {
+    setPipelineResult(null);
+    setTopic("");
+    setPage("home");
+  };
+
   return (
     <box
       alignItems="center"
@@ -42,19 +63,38 @@ function App() {
       flexGrow={1}
     >
       {page === "setup" ? (
-        <SetupPage onComplete={() => setPage("home")} />
+        <SetupPage
+          onComplete={() => setPage("home")}
+          onBack={hasAllKeys() ? () => setPage("home") : undefined}
+        />
       ) : page === "api-test" ? (
         <ApiTestPage onBack={() => setPage("home")} />
+      ) : page === "writing" ? (
+        <WritingPage
+          topic={topic}
+          onComplete={handleWritingComplete}
+          onBack={() => setPage("home")}
+        />
+      ) : page === "preview" && pipelineResult ? (
+        <PreviewPage
+          payload={pipelineResult.payload}
+          usage={pipelineResult.usage}
+          onDone={handlePreviewDone}
+        />
       ) : (
-        <HomePage onTestApi={() => setPage("api-test")} />
+        <HomePage
+          onTestApi={() => setPage("api-test")}
+          onSubmitTopic={handleSubmitTopic}
+          onSettings={() => setPage("setup")}
+        />
       )}
       <text
-        style={{ position: "absolute", left: 0, bottom: 0 }}
+        style={{ position: "absolute", right: 0, top: 0 }}
         attributes={TextAttributes.DIM}
       >
         {exitRequested
           ? "Press ESC again to exit."
-          : "You can always press ESC to exit."}
+          : "ESC to exit."}
       </text>
     </box>
   );
