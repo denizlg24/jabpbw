@@ -1,0 +1,84 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-unix:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: bun-linux-x64
+            artifact: jabpbw-linux-x64
+          - target: bun-linux-arm64
+            artifact: jabpbw-linux-arm64
+          - target: bun-darwin-x64
+            artifact: jabpbw-darwin-x64
+          - target: bun-darwin-arm64
+            artifact: jabpbw-darwin-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build standalone binary
+        run: bun build src/index.tsx --compile --target=${{ matrix.target }} --outfile ${{ matrix.artifact }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build standalone binary
+        run: bun build src/index.tsx --compile --windows-icon=assets/icon.ico --outfile jabpbw-windows-x64.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jabpbw-windows-x64.exe
+          path: jabpbw-windows-x64.exe
+
+  release:
+    needs: [build-unix, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: JABPBW ${{ github.event.inputs.tag || github.ref_name }}
+          generate_release_notes: true
+          files: artifacts/*
